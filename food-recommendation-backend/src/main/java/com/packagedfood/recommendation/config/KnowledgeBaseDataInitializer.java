@@ -21,12 +21,6 @@ public class KnowledgeBaseDataInitializer {
 
         return args -> {
 
-            /*
-             * =========================================================
-             * HEALTH CONDITIONS
-             * =========================================================
-             */
-
             if (healthConditionRepository.count() == 0) {
 
                 HealthCondition diabetes =
@@ -94,15 +88,6 @@ public class KnowledgeBaseDataInitializer {
                                         "A condition involving difficulty digesting lactose. Dairy and "
                                                 + "lactose-containing ingredients may require attention."
                                 ));
-
-                /*
-                 * =====================================================
-                 * INITIAL RULES
-                 * =====================================================
-                 *
-                 * These are knowledge-base factors rather than
-                 * final medical decision thresholds.
-                 */
 
                 ruleRepository.save(new HealthConditionRule(
                         diabetes,
@@ -222,15 +207,6 @@ public class KnowledgeBaseDataInitializer {
                         "https://www.nhs.uk/conditions/lactose-intolerance/"
                 ));
             }
-
-            /*
-             * =========================================================
-             * ADDITIVES
-             * =========================================================
-             *
-             * Thresholds are only stored where the value represents
-             * a clearly defined regulatory basis and food category.
-             */
 
             if (additiveRepository.count() == 0) {
 

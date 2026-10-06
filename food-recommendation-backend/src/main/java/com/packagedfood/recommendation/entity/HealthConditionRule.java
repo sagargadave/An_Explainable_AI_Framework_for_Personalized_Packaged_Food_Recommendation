@@ -16,7 +16,7 @@ public class HealthConditionRule {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @ManyToOne(fetch = FetchType.EAGER, optional = false)
     @JoinColumn(name = "health_condition_id", nullable = false)
     private HealthCondition healthCondition;
 
