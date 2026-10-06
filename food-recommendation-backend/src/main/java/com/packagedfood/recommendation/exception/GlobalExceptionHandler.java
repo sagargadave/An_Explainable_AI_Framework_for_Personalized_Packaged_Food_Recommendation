@@ -6,51 +6,36 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(InsufficientNutritionDataException.class)
-    public ResponseEntity<Map<String, Object>>
-    handleInsufficientNutritionData(
-            InsufficientNutritionDataException exception) {
-
-        Map<String, Object> response = new HashMap<>();
-
-        response.put("timestamp", Instant.now());
-        response.put("status", 400);
-        response.put("error", "INSUFFICIENT_NUTRITION_DATA");
-        response.put(
-                "message",
-                "Nutrition analysis cannot be performed because " +
-                        "one or more required nutrition values are missing."
-        );
-        response.put(
-                "missingFields",
-                exception.getMissingFields()
-        );
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalArgumentException(
+            IllegalArgumentException exception) {
 
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
-                .body(response);
+                .body(Map.of(
+                        "timestamp", Instant.now().toString(),
+                        "status", 400,
+                        "error", "Bad Request",
+                        "message", exception.getMessage()
+                ));
     }
 
-    @ExceptionHandler(AiServiceException.class)
-    public ResponseEntity<Map<String, Object>>
-    handleAiServiceException(
-            AiServiceException exception) {
-
-        Map<String, Object> response = new HashMap<>();
-
-        response.put("timestamp", Instant.now());
-        response.put("status", 503);
-        response.put("error", "AI_SERVICE_UNAVAILABLE");
-        response.put("message", exception.getMessage());
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<Map<String, Object>> handleRuntimeException(
+            RuntimeException exception) {
 
         return ResponseEntity
-                .status(HttpStatus.SERVICE_UNAVAILABLE)
-                .body(response);
+                .status(HttpStatus.NOT_FOUND)
+                .body(Map.of(
+                        "timestamp", Instant.now().toString(),
+                        "status", 404,
+                        "error", "Not Found",
+                        "message", exception.getMessage()
+                ));
     }
 }
