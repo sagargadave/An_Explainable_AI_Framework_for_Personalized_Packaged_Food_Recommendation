@@ -11,7 +11,6 @@ import com.packagedfood.recommendation.dto.PersonalizedDecisionRequest;
 import com.packagedfood.recommendation.dto.PersonalizedDecisionResponse;
 import com.packagedfood.recommendation.entity.Product;
 import com.packagedfood.recommendation.entity.UserHealthProfile;
-import com.packagedfood.recommendation.repository.ProductRepository;
 import com.packagedfood.recommendation.repository.UserHealthProfileRepository;
 import org.springframework.stereotype.Service;
 
@@ -21,20 +20,17 @@ import java.util.List;
 @Service
 public class PersonalizedDecisionService {
 
-    private final ProductRepository productRepository;
     private final UserHealthProfileRepository profileRepository;
     private final AiPredictionClient aiPredictionClient;
     private final HealthAnalysisService healthAnalysisService;
     private final AdditiveRiskAnalysisService additiveRiskAnalysisService;
 
     public PersonalizedDecisionService(
-            ProductRepository productRepository,
             UserHealthProfileRepository profileRepository,
             AiPredictionClient aiPredictionClient,
             HealthAnalysisService healthAnalysisService,
             AdditiveRiskAnalysisService additiveRiskAnalysisService) {
 
-        this.productRepository = productRepository;
         this.profileRepository = profileRepository;
         this.aiPredictionClient = aiPredictionClient;
         this.healthAnalysisService = healthAnalysisService;
@@ -46,16 +42,6 @@ public class PersonalizedDecisionService {
 
         validateRequest(request);
 
-        Product product =
-                productRepository.findById(
-                        request.getProductId()
-                ).orElseThrow(() ->
-                        new IllegalArgumentException(
-                                "Product not found with id: "
-                                        + request.getProductId()
-                        )
-                );
-
         UserHealthProfile profile =
                 profileRepository.findById(
                         request.getHealthProfileId()
@@ -66,14 +52,16 @@ public class PersonalizedDecisionService {
                         )
                 );
 
+        Product product = convertToProduct(
+                request.getProduct()
+        );
+
         /*
          * ---------------------------------------------------------
          * 1. NUTRITION / ML ANALYSIS
          * ---------------------------------------------------------
-         *
-         * Sends the product's eight nutrition features
-         * to the existing Python/XGBoost AI service.
          */
+
         AiPredictionResponse nutritionAnalysis =
                 analyzeNutrition(product);
 
@@ -81,15 +69,8 @@ public class PersonalizedDecisionService {
          * ---------------------------------------------------------
          * 2. HEALTH-CONDITION ANALYSIS
          * ---------------------------------------------------------
-         *
-         * The health analysis receives:
-         *
-         * - healthProfileId
-         * - product data directly
-         *
-         * The product does not need to be loaded again
-         * inside HealthAnalysisService.
          */
+
         HealthAnalysisResponse healthAnalysis =
                 analyzeHealth(product, profile);
 
@@ -97,15 +78,8 @@ public class PersonalizedDecisionService {
          * ---------------------------------------------------------
          * 3. ADDITIVE-RISK ANALYSIS
          * ---------------------------------------------------------
-         *
-         * The additive analysis also receives:
-         *
-         * - healthProfileId
-         * - product data directly
-         *
-         * The selected Open Food Facts product is therefore
-         * not required to be stored in the database.
          */
+
         AdditiveRiskResponse additiveRisk =
                 analyzeAdditives(product, profile);
 
@@ -114,6 +88,7 @@ public class PersonalizedDecisionService {
          * 4. COMBINE ALL THREE ANALYSES
          * ---------------------------------------------------------
          */
+
         return buildFinalDecision(
                 product,
                 profile,
@@ -121,6 +96,41 @@ public class PersonalizedDecisionService {
                 healthAnalysis,
                 additiveRisk
         );
+    }
+
+    /**
+     * Converts the product received from the request
+     * into the existing Product model used internally
+     * by the analysis services.
+     *
+     * The product is NOT saved to MySQL.
+     */
+    private Product convertToProduct(
+            PersonalizedDecisionRequest.ProductData productData) {
+
+        Product product = new Product();
+
+        product.setBarcode(productData.getBarcode());
+        product.setProductName(productData.getProductName());
+        product.setBrands(productData.getBrands());
+        product.setCategories(productData.getCategories());
+        product.setIngredientsText(productData.getIngredientsText());
+        product.setImageUrl(productData.getImageUrl());
+
+        product.setEnergy100g(productData.getEnergy100g());
+        product.setFat100g(productData.getFat100g());
+        product.setSaturatedFat100g(
+                productData.getSaturatedFat100g()
+        );
+        product.setCarbohydrates100g(
+                productData.getCarbohydrates100g()
+        );
+        product.setSugars100g(productData.getSugars100g());
+        product.setFiber100g(productData.getFiber100g());
+        product.setProteins100g(productData.getProteins100g());
+        product.setSalt100g(productData.getSalt100g());
+
+        return product;
     }
 
     /**
@@ -137,46 +147,21 @@ public class PersonalizedDecisionService {
         AiPredictionRequest request =
                 new AiPredictionRequest();
 
-        request.setEnergy(
-                product.getEnergy100g()
-        );
-
-        request.setFat(
-                product.getFat100g()
-        );
-
-        request.setSaturatedFat(
-                product.getSaturatedFat100g()
-        );
-
-        request.setCarbohydrates(
-                product.getCarbohydrates100g()
-        );
-
-        request.setSugars(
-                product.getSugars100g()
-        );
-
-        request.setFiber(
-                product.getFiber100g()
-        );
-
-        request.setProteins(
-                product.getProteins100g()
-        );
-
-        request.setSalt(
-                product.getSalt100g()
-        );
+        request.setEnergy(product.getEnergy100g());
+        request.setFat(product.getFat100g());
+        request.setSaturatedFat(product.getSaturatedFat100g());
+        request.setCarbohydrates(product.getCarbohydrates100g());
+        request.setSugars(product.getSugars100g());
+        request.setFiber(product.getFiber100g());
+        request.setProteins(product.getProteins100g());
+        request.setSalt(product.getSalt100g());
 
         return aiPredictionClient.predict(request);
     }
 
     /**
-     * Uses the health profile and the selected product
+     * Uses the health profile and selected product
      * directly for health-condition analysis.
-     *
-     * The product is NOT stored by this method.
      */
     private HealthAnalysisResponse analyzeHealth(
             Product product,
@@ -185,17 +170,10 @@ public class PersonalizedDecisionService {
         HealthAnalysisRequest request =
                 new HealthAnalysisRequest();
 
-        /*
-         * Use the existing health profile.
-         */
         request.setHealthProfileId(
                 profile.getId()
         );
 
-        /*
-         * Build product data directly from
-         * the selected product.
-         */
         HealthAnalysisRequest.ProductData productData =
                 new HealthAnalysisRequest.ProductData();
 
@@ -243,19 +221,14 @@ public class PersonalizedDecisionService {
                 product.getSalt100g()
         );
 
-        request.setProduct(
-                productData
-        );
+        request.setProduct(productData);
 
         return healthAnalysisService.analyze(request);
     }
 
     /**
      * Performs additive-risk analysis using
-     * the selected product data directly.
-     *
-     * The product is NOT required to exist in the
-     * product database.
+     * the selected product directly.
      */
     private AdditiveRiskResponse analyzeAdditives(
             Product product,
@@ -264,17 +237,10 @@ public class PersonalizedDecisionService {
         AdditiveRiskRequest request =
                 new AdditiveRiskRequest();
 
-        /*
-         * Use the existing health profile.
-         */
         request.setHealthProfileId(
                 profile.getId()
         );
 
-        /*
-         * Build product data directly from
-         * the selected product.
-         */
         AdditiveRiskRequest.ProductData productData =
                 new AdditiveRiskRequest.ProductData();
 
@@ -290,9 +256,7 @@ public class PersonalizedDecisionService {
                 product.getIngredientsText()
         );
 
-        request.setProduct(
-                productData
-        );
+        request.setProduct(productData);
 
         return additiveRiskAnalysisService.analyze(
                 request
@@ -333,6 +297,15 @@ public class PersonalizedDecisionService {
                         .stream()
                         .anyMatch(condition ->
                                 "MODERATE".equalsIgnoreCase(
+                                        condition.getOverallSeverity()
+                                )
+                        );
+
+        boolean healthInformationAvailable =
+                healthAnalysis.getConditions()
+                        .stream()
+                        .anyMatch(condition ->
+                                "INFORMATION".equalsIgnoreCase(
                                         condition.getOverallSeverity()
                                 )
                         );
@@ -385,6 +358,13 @@ public class PersonalizedDecisionService {
 
             reasons.add(
                     "A moderate health concern was identified for the selected health profile."
+            );
+        }
+
+        if (healthInformationAvailable) {
+
+            reasons.add(
+                    "Important health-related factors were identified for the selected health profile and should be reviewed."
             );
         }
 
@@ -454,10 +434,6 @@ public class PersonalizedDecisionService {
             overallSeverity = "LOW";
         }
 
-        /*
-         * If nothing produced a concern,
-         * provide a neutral explanation.
-         */
         if (reasons.isEmpty()) {
 
             reasons.add(
@@ -475,6 +451,7 @@ public class PersonalizedDecisionService {
                 new PersonalizedDecisionResponse.DecisionSummary(
                         highHealthConcern,
                         moderateHealthConcern,
+                        healthInformationAvailable,
                         additiveAvoid,
                         additiveCannotAssess,
                         poorNutrition,
@@ -593,18 +570,33 @@ public class PersonalizedDecisionService {
             );
         }
 
-        if (request.getProductId() == null) {
-
-            throw new IllegalArgumentException(
-                    "productId is required"
-            );
-        }
-
         if (request.getHealthProfileId() == null) {
 
             throw new IllegalArgumentException(
                     "healthProfileId is required"
             );
         }
+
+        if (request.getProduct() == null) {
+
+            throw new IllegalArgumentException(
+                    "product is required"
+            );
+        }
+
+        if (isBlank(
+                request.getProduct().getProductName()
+        )) {
+
+            throw new IllegalArgumentException(
+                    "product.productName is required"
+            );
+        }
+    }
+
+    private boolean isBlank(String value) {
+
+        return value == null
+                || value.trim().isEmpty();
     }
 }

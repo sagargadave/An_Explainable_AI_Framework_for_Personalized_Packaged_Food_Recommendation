@@ -10,17 +10,13 @@ import java.util.List;
 public class PersonalizedDecisionResponse {
 
     private Long productId;
-
     private String productName;
-
     private Long healthProfileId;
 
     private String nutritionGrade;
-
     private String nutritionSummary;
 
     private String finalRecommendation;
-
     private String overallSeverity;
 
     private List<String> reasons;
@@ -32,15 +28,13 @@ public class PersonalizedDecisionResponse {
     public static class DecisionSummary {
 
         private boolean highHealthConcern;
-
         private boolean moderateHealthConcern;
+        private boolean healthInformationAvailable;
 
         private boolean additiveAvoid;
-
         private boolean additiveCannotAssess;
 
         private boolean poorNutrition;
-
         private boolean nutritionAnalysisAvailable;
     }
 }

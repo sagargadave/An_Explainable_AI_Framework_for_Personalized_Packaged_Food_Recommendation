@@ -30,9 +30,14 @@ public class OpenFoodFactsClient {
                         .queryParam("page_size", "10")
                         .queryParam(
                                 "fields",
-                                "code,product_name,brands,categories,ingredients_text,image_url," +
-                                        "energy_100g,fat_100g,saturated-fat_100g,carbohydrates_100g," +
-                                        "sugars_100g,fiber_100g,proteins_100g,salt_100g"
+                                "code,product_name,brands,categories," +
+                                        "ingredients_text,image_url," +
+                                        "additives,additives_tags," +
+                                        "serving_size,serving_quantity," +
+                                        "energy_100g,fat_100g," +
+                                        "saturated-fat_100g,carbohydrates_100g," +
+                                        "sugars_100g,fiber_100g," +
+                                        "proteins_100g,salt_100g"
                         )
                         .build())
                 .retrieve()
@@ -56,37 +61,120 @@ public class OpenFoodFactsClient {
         OpenFoodFactsProductDTO dto =
                 new OpenFoodFactsProductDTO();
 
-        dto.setCode((String) product.get("code"));
-        dto.setProduct_name((String) product.get("product_name"));
-        dto.setBrands((String) product.get("brands"));
-        dto.setCategories((String) product.get("categories"));
+        /*
+         * ---------------------------------------------------------
+         * BASIC PRODUCT INFORMATION
+         * ---------------------------------------------------------
+         */
+
+        dto.setCode(
+                (String) product.get("code")
+        );
+
+        dto.setProduct_name(
+                (String) product.get("product_name")
+        );
+
+        dto.setBrands(
+                (String) product.get("brands")
+        );
+
+        dto.setCategories(
+                (String) product.get("categories")
+        );
+
         dto.setIngredients_text(
-                (String) product.get("ingredients_text"));
-        dto.setImage_url((String) product.get("image_url"));
+                (String) product.get("ingredients_text")
+        );
+
+        dto.setImage_url(
+                (String) product.get("image_url")
+        );
+
+        /*
+         * ---------------------------------------------------------
+         * ADDITIVE INFORMATION
+         * ---------------------------------------------------------
+         */
+
+        dto.setAdditives(
+                (String) product.get("additives")
+        );
+
+        Object additivesTagsValue =
+                product.get("additives_tags");
+
+        if (additivesTagsValue instanceof List<?> list) {
+
+            List<String> additivesTags =
+                    list.stream()
+                            .filter(String.class::isInstance)
+                            .map(String.class::cast)
+                            .toList();
+
+            dto.setAdditives_tags(additivesTags);
+
+        } else {
+
+            dto.setAdditives_tags(List.of());
+        }
+
+        /*
+         * ---------------------------------------------------------
+         * SERVING INFORMATION
+         * ---------------------------------------------------------
+         *
+         * IMPORTANT:
+         * serving_quantity is the quantity of the complete
+         * food serving. It is NOT the quantity of an additive.
+         * ---------------------------------------------------------
+         */
+
+        dto.setServing_size(
+                (String) product.get("serving_size")
+        );
+
+        dto.setServing_quantity(
+                toDouble(product.get("serving_quantity"))
+        );
+
+        /*
+         * ---------------------------------------------------------
+         * NUTRITION INFORMATION
+         * ---------------------------------------------------------
+         */
 
         dto.setEnergy_100g(
-                toDouble(product.get("energy_100g")));
+                toDouble(product.get("energy_100g"))
+        );
 
         dto.setFat_100g(
-                toDouble(product.get("fat_100g")));
+                toDouble(product.get("fat_100g"))
+        );
 
         dto.setSaturated_fat_100g(
-                toDouble(product.get("saturated-fat_100g")));
+                toDouble(product.get("saturated-fat_100g"))
+        );
 
         dto.setCarbohydrates_100g(
-                toDouble(product.get("carbohydrates_100g")));
+                toDouble(product.get("carbohydrates_100g"))
+        );
 
         dto.setSugars_100g(
-                toDouble(product.get("sugars_100g")));
+                toDouble(product.get("sugars_100g"))
+        );
 
         dto.setFiber_100g(
-                toDouble(product.get("fiber_100g")));
+                toDouble(product.get("fiber_100g"))
+        );
 
         dto.setProteins_100g(
-                toDouble(product.get("proteins_100g")));
+                toDouble(product.get("proteins_100g"))
+        );
 
         dto.setSalt_100g(
-                toDouble(product.get("salt_100g")));
+                toDouble(product.get("salt_100g"))
+        );
 
         return dto;
     }
@@ -102,8 +190,12 @@ public class OpenFoodFactsClient {
         }
 
         try {
-            return Double.parseDouble(value.toString());
+            return Double.parseDouble(
+                    value.toString()
+            );
+
         } catch (NumberFormatException exception) {
+
             return null;
         }
     }

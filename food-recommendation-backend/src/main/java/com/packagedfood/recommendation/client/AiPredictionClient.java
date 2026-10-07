@@ -3,6 +3,7 @@ package com.packagedfood.recommendation.client;
 import com.packagedfood.recommendation.dto.AiPredictionRequest;
 import com.packagedfood.recommendation.dto.AiPredictionResponse;
 import com.packagedfood.recommendation.exception.AiServiceException;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -22,13 +23,25 @@ public class AiPredictionClient {
 
         try {
 
-            AiPredictionResponse response = restClient.post()
-                    .uri("/predict")
-                    .body(request)
-                    .retrieve()
-                    .body(AiPredictionResponse.class);
+            AiPredictionResponse response =
+                    restClient.post()
+                            .uri("/predict")
+                            .body(request)
+                            .retrieve()
+                            .onStatus(
+                                    HttpStatusCode::isError,
+                                    (request1, response1) -> {
+
+                                        throw new AiServiceException(
+                                                "AI service returned HTTP status: "
+                                                        + response1.getStatusCode()
+                                        );
+                                    }
+                            )
+                            .body(AiPredictionResponse.class);
 
             if (response == null) {
+
                 throw new AiServiceException(
                         "AI service returned an empty response."
                 );
@@ -43,8 +56,10 @@ public class AiPredictionClient {
         } catch (Exception exception) {
 
             throw new AiServiceException(
-                    "Unable to communicate with the AI service. " +
-                            "Make sure the Flask AI service is running on port 5000.",
+                    "Unable to communicate with the AI service at "
+                            + "http://localhost:5000/predict. "
+                            + "Actual error: "
+                            + exception.getMessage(),
                     exception
             );
         }
