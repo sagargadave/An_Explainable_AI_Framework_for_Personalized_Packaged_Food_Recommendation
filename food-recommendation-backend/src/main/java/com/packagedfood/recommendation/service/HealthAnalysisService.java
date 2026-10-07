@@ -271,8 +271,44 @@ public class HealthAnalysisService {
         }
 
         /*
-         * A rule without a threshold and without a supported
-         * ingredient/presence evaluation cannot be evaluated safely.
+         * IMPORTANT_FACTOR rules.
+         *
+         * These rules intentionally do not define a numeric threshold.
+         * They identify nutrients that should be reviewed for a
+         * particular health condition.
+         *
+         * Example:
+         * Diabetes -> carbohydrates -> IMPORTANT_FACTOR
+         * Diabetes -> sugars -> IMPORTANT_FACTOR
+         *
+         * The actual product value is included in the finding, but
+         * no unsafe medical threshold is invented here.
+         */
+        if ("important_factor".equals(
+                normalize(rule.getSeverity()))) {
+
+            if (productValue == null) {
+                return null;
+            }
+
+            return new HealthAnalysisResponse.HealthFinding(
+                    rule.getFactor(),
+                    rule.getSeverity(),
+                    productValue,
+                    rule.getUnit(),
+                    rule.getOperator(),
+                    null,
+                    rule.getRecommendation(),
+                    rule.getReason(),
+                    rule.getSource(),
+                    rule.getSourceUrl()
+            );
+        }
+
+        /*
+         * A rule without a threshold, without an IMPORTANT_FACTOR
+         * designation, and without a supported ingredient/presence
+         * evaluation cannot be evaluated safely.
          */
         return null;
     }
@@ -471,6 +507,10 @@ public class HealthAnalysisService {
             return "LOW";
         }
 
+        /*
+         * IMPORTANT_FACTOR and other informational findings
+         * are intentionally not promoted to HIGH/MODERATE/LOW.
+         */
         return "INFORMATION";
     }
 
@@ -534,6 +574,16 @@ public class HealthAnalysisService {
 
         if (hasLow) {
             return "CONSUME_WITH_CAUTION";
+        }
+
+        boolean hasInformation =
+                conditions.stream()
+                        .anyMatch(condition ->
+                                "INFORMATION".equalsIgnoreCase(
+                                        condition.getOverallSeverity()));
+
+        if (hasInformation) {
+            return "REVIEW";
         }
 
         return "NO_SPECIFIC_CONCERN_IDENTIFIED";
