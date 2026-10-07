@@ -4,10 +4,10 @@ import com.packagedfood.recommendation.dto.HealthAnalysisRequest;
 import com.packagedfood.recommendation.dto.HealthAnalysisResponse;
 import com.packagedfood.recommendation.entity.HealthCondition;
 import com.packagedfood.recommendation.entity.HealthConditionRule;
-import com.packagedfood.recommendation.entity.Product;
+import com.packagedfood.recommendation.entity.UserHealthProfile;
 import com.packagedfood.recommendation.repository.HealthConditionRepository;
 import com.packagedfood.recommendation.repository.HealthConditionRuleRepository;
-import com.packagedfood.recommendation.repository.ProductRepository;
+import com.packagedfood.recommendation.repository.UserHealthProfileRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,16 +19,16 @@ import java.util.Locale;
 @Service
 public class HealthAnalysisService {
 
-    private final ProductRepository productRepository;
+    private final UserHealthProfileRepository profileRepository;
     private final HealthConditionRepository healthConditionRepository;
     private final HealthConditionRuleRepository ruleRepository;
 
     public HealthAnalysisService(
-            ProductRepository productRepository,
+            UserHealthProfileRepository profileRepository,
             HealthConditionRepository healthConditionRepository,
             HealthConditionRuleRepository ruleRepository) {
 
-        this.productRepository = productRepository;
+        this.profileRepository = profileRepository;
         this.healthConditionRepository = healthConditionRepository;
         this.ruleRepository = ruleRepository;
     }
@@ -39,27 +39,29 @@ public class HealthAnalysisService {
 
         validateRequest(request);
 
-        Product product =
-                productRepository.findById(request.getProductId())
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Product not found with id: "
-                                                + request.getProductId()));
+        UserHealthProfile profile =
+                profileRepository.findById(
+                        request.getHealthProfileId()
+                ).orElseThrow(() ->
+                        new RuntimeException(
+                                "Health profile not found with id: "
+                                        + request.getHealthProfileId()
+                        )
+                );
+
+        HealthAnalysisRequest.ProductData product =
+                request.getProduct();
 
         List<HealthAnalysisResponse.ConditionAnalysis>
                 conditionAnalyses = new ArrayList<>();
 
-        for (Long conditionId : request.getHealthConditionIds()) {
-
-            HealthCondition condition =
-                    healthConditionRepository.findById(conditionId)
-                            .orElseThrow(() ->
-                                    new RuntimeException(
-                                            "Health condition not found with id: "
-                                                    + conditionId));
+        for (HealthCondition condition :
+                profile.getHealthConditions()) {
 
             List<HealthConditionRule> rules =
-                    ruleRepository.findByHealthConditionId(conditionId);
+                    ruleRepository.findByHealthConditionId(
+                            condition.getId()
+                    );
 
             List<HealthAnalysisResponse.HealthFinding> findings =
                     new ArrayList<>();
@@ -73,6 +75,13 @@ public class HealthAnalysisService {
                     findings.add(finding);
                 }
             }
+
+            findings.sort(
+                    Comparator.comparing(
+                            HealthAnalysisResponse.HealthFinding::getSeverity,
+                            Comparator.nullsLast(String::compareToIgnoreCase)
+                    )
+            );
 
             String severity =
                     determineOverallSeverity(findings);
@@ -100,8 +109,9 @@ public class HealthAnalysisService {
                 );
 
         return new HealthAnalysisResponse(
-                product.getId(),
+                product.getBarcode(),
                 product.getProductName(),
+                profile.getId(),
                 conditionAnalyses,
                 overallRecommendation
         );
@@ -112,24 +122,87 @@ public class HealthAnalysisService {
 
         if (request == null) {
             throw new IllegalArgumentException(
-                    "Request body is required");
+                    "Request body is required"
+            );
         }
 
-        if (request.getProductId() == null) {
+        if (request.getHealthProfileId() == null) {
             throw new IllegalArgumentException(
-                    "productId is required");
+                    "healthProfileId is required"
+            );
         }
 
-        if (request.getHealthConditionIds() == null
-                || request.getHealthConditionIds().isEmpty()) {
-
+        if (request.getProduct() == null) {
             throw new IllegalArgumentException(
-                    "At least one health condition must be selected");
+                    "Product data is required"
+            );
+        }
+
+        validateProduct(request.getProduct());
+    }
+
+    private void validateProduct(
+            HealthAnalysisRequest.ProductData product) {
+
+        if (isInvalid(product.getEnergy100g())) {
+            throw new IllegalArgumentException(
+                    "energy100g is required and must be non-negative"
+            );
+        }
+
+        if (isInvalid(product.getFat100g())) {
+            throw new IllegalArgumentException(
+                    "fat100g is required and must be non-negative"
+            );
+        }
+
+        if (isInvalid(product.getSaturatedFat100g())) {
+            throw new IllegalArgumentException(
+                    "saturatedFat100g is required and must be non-negative"
+            );
+        }
+
+        if (isInvalid(product.getCarbohydrates100g())) {
+            throw new IllegalArgumentException(
+                    "carbohydrates100g is required and must be non-negative"
+            );
+        }
+
+        if (isInvalid(product.getSugars100g())) {
+            throw new IllegalArgumentException(
+                    "sugars100g is required and must be non-negative"
+            );
+        }
+
+        if (isInvalid(product.getFiber100g())) {
+            throw new IllegalArgumentException(
+                    "fiber100g is required and must be non-negative"
+            );
+        }
+
+        if (isInvalid(product.getProteins100g())) {
+            throw new IllegalArgumentException(
+                    "proteins100g is required and must be non-negative"
+            );
+        }
+
+        if (isInvalid(product.getSalt100g())) {
+            throw new IllegalArgumentException(
+                    "salt100g is required and must be non-negative"
+            );
         }
     }
 
+    private boolean isInvalid(Double value) {
+
+        return value == null
+                || value.isNaN()
+                || value.isInfinite()
+                || value < 0;
+    }
+
     private HealthAnalysisResponse.HealthFinding evaluateRule(
-            Product product,
+            HealthAnalysisRequest.ProductData product,
             HealthConditionRule rule) {
 
         String factor =
@@ -205,7 +278,7 @@ public class HealthAnalysisService {
     }
 
     private Double getProductValue(
-            Product product,
+            HealthAnalysisRequest.ProductData product,
             String factor) {
 
         return switch (factor) {
@@ -286,7 +359,7 @@ public class HealthAnalysisService {
     }
 
     private boolean ingredientRuleMatches(
-            Product product,
+            HealthAnalysisRequest.ProductData product,
             HealthConditionRule rule) {
 
         String ingredients =
@@ -365,8 +438,10 @@ public class HealthAnalysisService {
         boolean hasHigh =
                 findings.stream()
                         .anyMatch(f ->
-                                "HIGH".equalsIgnoreCase(f.getSeverity())
-                                        || "HIGH_CONCERN".equalsIgnoreCase(f.getSeverity()));
+                                "HIGH".equalsIgnoreCase(
+                                        f.getSeverity())
+                                        || "HIGH_CONCERN".equalsIgnoreCase(
+                                        f.getSeverity()));
 
         if (hasHigh) {
             return "HIGH";
@@ -375,8 +450,10 @@ public class HealthAnalysisService {
         boolean hasModerate =
                 findings.stream()
                         .anyMatch(f ->
-                                "MODERATE".equalsIgnoreCase(f.getSeverity())
-                                        || "MODERATE_CONCERN".equalsIgnoreCase(f.getSeverity()));
+                                "MODERATE".equalsIgnoreCase(
+                                        f.getSeverity())
+                                        || "MODERATE_CONCERN".equalsIgnoreCase(
+                                        f.getSeverity()));
 
         if (hasModerate) {
             return "MODERATE";
@@ -385,8 +462,10 @@ public class HealthAnalysisService {
         boolean hasLow =
                 findings.stream()
                         .anyMatch(f ->
-                                "LOW".equalsIgnoreCase(f.getSeverity())
-                                        || "LOW_CONCERN".equalsIgnoreCase(f.getSeverity()));
+                                "LOW".equalsIgnoreCase(
+                                        f.getSeverity())
+                                        || "LOW_CONCERN".equalsIgnoreCase(
+                                        f.getSeverity()));
 
         if (hasLow) {
             return "LOW";

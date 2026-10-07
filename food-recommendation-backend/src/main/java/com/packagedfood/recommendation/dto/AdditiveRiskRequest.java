@@ -9,7 +9,19 @@ import lombok.Setter;
 @NoArgsConstructor
 public class AdditiveRiskRequest {
 
-    private Long productId;
-
     private Long healthProfileId;
+
+    private ProductData product;
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    public static class ProductData {
+
+        private String barcode;
+
+        private String productName;
+
+        private String ingredientsText;
+    }
 }
