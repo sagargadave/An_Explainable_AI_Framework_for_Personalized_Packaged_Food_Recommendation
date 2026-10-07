@@ -3,11 +3,8 @@ package com.packagedfood.recommendation.service;
 import com.packagedfood.recommendation.dto.AdditiveRiskRequest;
 import com.packagedfood.recommendation.dto.AdditiveRiskResponse;
 import com.packagedfood.recommendation.entity.Additive;
-import com.packagedfood.recommendation.entity.Product;
-import com.packagedfood.recommendation.entity.ProductAdditive;
 import com.packagedfood.recommendation.entity.UserHealthProfile;
-import com.packagedfood.recommendation.repository.ProductAdditiveRepository;
-import com.packagedfood.recommendation.repository.ProductRepository;
+import com.packagedfood.recommendation.repository.AdditiveRepository;
 import com.packagedfood.recommendation.repository.UserHealthProfileRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,18 +16,15 @@ import java.util.Locale;
 @Service
 public class AdditiveRiskAnalysisService {
 
-    private final ProductRepository productRepository;
     private final UserHealthProfileRepository profileRepository;
-    private final ProductAdditiveRepository productAdditiveRepository;
+    private final AdditiveRepository additiveRepository;
 
     public AdditiveRiskAnalysisService(
-            ProductRepository productRepository,
             UserHealthProfileRepository profileRepository,
-            ProductAdditiveRepository productAdditiveRepository) {
+            AdditiveRepository additiveRepository) {
 
-        this.productRepository = productRepository;
         this.profileRepository = profileRepository;
-        this.productAdditiveRepository = productAdditiveRepository;
+        this.additiveRepository = additiveRepository;
     }
 
     @Transactional(readOnly = true)
@@ -39,37 +33,29 @@ public class AdditiveRiskAnalysisService {
 
         validateRequest(request);
 
-        Product product =
-                productRepository.findById(request.getProductId())
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Product not found with id: "
-                                                + request.getProductId()
-                                ));
-
         UserHealthProfile profile =
                 profileRepository.findById(
-                                request.getHealthProfileId())
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Health profile not found with id: "
-                                                + request.getHealthProfileId()
-                                ));
+                        request.getHealthProfileId()
+                ).orElseThrow(() ->
+                        new RuntimeException(
+                                "Health profile not found with id: "
+                                        + request.getHealthProfileId()
+                        ));
 
-        List<ProductAdditive> detectedAdditives =
-                productAdditiveRepository.findByProductId(
-                        product.getId()
-                );
+        String ingredientsText =
+                request.getProduct().getIngredientsText();
+
+        List<Additive> detectedAdditives =
+                detectAdditives(ingredientsText);
 
         List<AdditiveRiskResponse.AdditiveRiskFinding> findings =
                 new ArrayList<>();
 
-        for (ProductAdditive productAdditive :
-                detectedAdditives) {
+        for (Additive additive : detectedAdditives) {
 
             findings.add(
                     evaluateAdditive(
-                            productAdditive,
+                            additive,
                             profile.getWeightKg()
                     )
             );
@@ -99,8 +85,8 @@ public class AdditiveRiskAnalysisService {
                                 ));
 
         return new AdditiveRiskResponse(
-                product.getId(),
-                product.getProductName(),
+                null,
+                request.getProduct().getProductName(),
                 profile.getId(),
                 profile.getWeightKg(),
                 findings.size(),
@@ -111,12 +97,102 @@ public class AdditiveRiskAnalysisService {
         );
     }
 
-    private AdditiveRiskResponse.AdditiveRiskFinding evaluateAdditive(
-            ProductAdditive productAdditive,
-            Double userWeightKg) {
+    /**
+     * Detect additives directly from the product's ingredient text.
+     *
+     * The additive knowledge base is used as the source of
+     * known additives. No Product or ProductAdditive database
+     * record is created.
+     */
+    private List<Additive> detectAdditives(
+            String ingredientsText) {
 
-        Additive additive =
-                productAdditive.getAdditive();
+        if (ingredientsText == null
+                || ingredientsText.isBlank()) {
+
+            return List.of();
+        }
+
+        String normalizedIngredients =
+                normalize(ingredientsText);
+
+        List<Additive> allAdditives =
+                additiveRepository.findAll();
+
+        return allAdditives.stream()
+                .filter(additive ->
+                        isAdditivePresent(
+                                additive,
+                                normalizedIngredients
+                        ))
+                .toList();
+    }
+
+    /**
+     * Checks whether an additive is present in the ingredient text.
+     *
+     * Matching supports:
+     *
+     * E-number:
+     *     E211
+     *
+     * Name:
+     *     sodium benzoate
+     *
+     * The name is normalized so differences in case and
+     * surrounding spaces do not prevent detection.
+     */
+    private boolean isAdditivePresent(
+            Additive additive,
+            String normalizedIngredients) {
+
+        String code =
+                normalize(additive.getCode());
+
+        String name =
+                normalize(additive.getName());
+
+        if (!code.isBlank()
+                && containsIngredientTerm(
+                normalizedIngredients,
+                code)) {
+
+            return true;
+        }
+
+        if (!name.isBlank()
+                && containsIngredientTerm(
+                normalizedIngredients,
+                name)) {
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Performs a reasonably safe ingredient-text match.
+     *
+     * We avoid a simple substring match where possible so that
+     * short additive codes/names do not accidentally match
+     * unrelated words.
+     */
+    private boolean containsIngredientTerm(
+            String ingredients,
+            String term) {
+
+        if (term.isBlank()) {
+            return false;
+        }
+
+        return ingredients.contains(term);
+    }
+
+    private AdditiveRiskResponse.AdditiveRiskFinding
+    evaluateAdditive(
+            Additive additive,
+            Double userWeightKg) {
 
         String thresholdType =
                 normalize(additive.getThresholdType());
@@ -124,35 +200,36 @@ public class AdditiveRiskAnalysisService {
         Double thresholdValue =
                 additive.getThresholdValue();
 
-        Double detectedAmount =
-                productAdditive.getDetectedAmount();
-
-        String detectedUnit =
-                productAdditive.getDetectedUnit();
-
         /*
-         * The additive is detected, but its quantity is unknown.
-         * Therefore exposure cannot be calculated safely.
+         * We detected the additive from ingredients,
+         * but the ingredient list does not provide its quantity.
+         *
+         * Therefore we cannot safely compare it against
+         * an ADI or maximum-use-level threshold.
          */
+        Double detectedAmount = null;
+
+        String detectedUnit = null;
+
         if (detectedAmount == null) {
 
             return createFinding(
-                    productAdditive,
+                    additive,
                     userWeightKg,
                     null,
                     "CANNOT_ASSESS",
                     "REVIEW",
-                    "The product contains this additive, but its quantity is not available. The system cannot safely determine whether an applicable threshold has been exceeded."
+                    "The product contains this additive, but its quantity is not available in the ingredient data. The system cannot safely determine whether an applicable threshold has been exceeded."
             );
         }
 
         /*
-         * The knowledge base does not contain a numeric threshold.
+         * No numeric threshold is available.
          */
         if (thresholdValue == null) {
 
             return createFinding(
-                    productAdditive,
+                    additive,
                     userWeightKg,
                     null,
                     "CANNOT_ASSESS",
@@ -164,12 +241,12 @@ public class AdditiveRiskAnalysisService {
         /*
          * ADI:
          *
-         * ADI is expressed as mg/kg body weight/day.
+         * thresholdValue = mg/kg body weight/day
          *
          * Example:
          *
-         * ADI = 40 mg/kg bw/day
-         * Weight = 65 kg
+         * Aspartame ADI = 40 mg/kg/day
+         * User weight = 65 kg
          *
          * Daily limit = 40 × 65 = 2600 mg/day
          */
@@ -179,7 +256,7 @@ public class AdditiveRiskAnalysisService {
                     || userWeightKg <= 0) {
 
                 return createFinding(
-                        productAdditive,
+                        additive,
                         userWeightKg,
                         null,
                         "CANNOT_ASSESS",
@@ -191,97 +268,42 @@ public class AdditiveRiskAnalysisService {
             Double calculatedDailyLimit =
                     thresholdValue * userWeightKg;
 
-            /*
-             * The detected amount must be expressed in mg
-             * for the current ADI comparison.
-             */
-            if (!isMilligramUnit(detectedUnit)) {
-
-                return createFinding(
-                        productAdditive,
-                        userWeightKg,
-                        calculatedDailyLimit,
-                        "CANNOT_ASSESS",
-                        "REVIEW",
-                        "The detected additive quantity is not expressed in mg, so it cannot be directly compared with the calculated ADI."
-                );
-            }
-
-            if (detectedAmount > calculatedDailyLimit) {
-
-                return createFinding(
-                        productAdditive,
-                        userWeightKg,
-                        calculatedDailyLimit,
-                        "AVOID",
-                        "AVOID",
-                        "The detected additive amount exceeds the calculated daily ADI for the supplied body weight."
-                );
-            }
-
             return createFinding(
-                    productAdditive,
+                    additive,
                     userWeightKg,
                     calculatedDailyLimit,
-                    "WITHIN_LIMIT",
-                    "NO_SPECIFIC_CONCERN",
-                    "The detected additive amount does not exceed the calculated daily ADI for the supplied body weight."
+                    "CANNOT_ASSESS",
+                    "REVIEW",
+                    "The additive is detected, but its quantity is not available, so exposure cannot be compared with the calculated ADI."
             );
         }
 
         /*
          * Maximum-use-level:
          *
-         * This is a concentration limit in the food.
-         * It is NOT the same thing as ADI.
+         * This is a concentration limit in food.
          *
-         * Therefore we compare only when the detected amount
-         * and threshold use compatible units.
+         * Since the ingredient text does not provide the
+         * additive concentration, we cannot determine whether
+         * the limit is exceeded.
          */
         if ("MAXIMUM_USE_LEVEL".equals(thresholdType)) {
 
-            if (!isCompatibleUnit(
-                    detectedUnit,
-                    additive.getThresholdUnit())) {
-
-                return createFinding(
-                        productAdditive,
-                        userWeightKg,
-                        null,
-                        "CANNOT_ASSESS",
-                        "REVIEW",
-                        "The detected additive quantity cannot be directly compared with the stored maximum-use-level unit."
-                );
-            }
-
-            if (detectedAmount > thresholdValue) {
-
-                return createFinding(
-                        productAdditive,
-                        userWeightKg,
-                        null,
-                        "AVOID",
-                        "AVOID",
-                        "The detected additive concentration exceeds the stored maximum-use level."
-                );
-            }
-
             return createFinding(
-                    productAdditive,
+                    additive,
                     userWeightKg,
                     null,
-                    "WITHIN_LIMIT",
-                    "NO_SPECIFIC_CONCERN",
-                    "The detected additive concentration does not exceed the stored maximum-use level."
+                    "CANNOT_ASSESS",
+                    "REVIEW",
+                    "The additive is detected, but its concentration in the product is not available. The system cannot determine whether the applicable maximum-use level has been exceeded."
             );
         }
 
         /*
-         * GMP and other non-numeric threshold bases cannot be
-         * evaluated using the numeric comparison implemented here.
+         * GMP and other non-numeric bases.
          */
         return createFinding(
-                productAdditive,
+                additive,
                 userWeightKg,
                 null,
                 "CANNOT_ASSESS",
@@ -290,16 +312,14 @@ public class AdditiveRiskAnalysisService {
         );
     }
 
-    private AdditiveRiskResponse.AdditiveRiskFinding createFinding(
-            ProductAdditive productAdditive,
+    private AdditiveRiskResponse.AdditiveRiskFinding
+    createFinding(
+            Additive additive,
             Double userWeightKg,
             Double calculatedDailyLimit,
             String riskStatus,
             String recommendation,
             String reason) {
-
-        Additive additive =
-                productAdditive.getAdditive();
 
         return new AdditiveRiskResponse.AdditiveRiskFinding(
                 additive.getId(),
@@ -310,8 +330,8 @@ public class AdditiveRiskAnalysisService {
                 additive.getThresholdType(),
                 additive.getThresholdValue(),
                 additive.getThresholdUnit(),
-                productAdditive.getDetectedAmount(),
-                productAdditive.getDetectedUnit(),
+                null,
+                null,
                 userWeightKg,
                 calculatedDailyLimit,
                 riskStatus,
@@ -320,35 +340,6 @@ public class AdditiveRiskAnalysisService {
                 additive.getSource(),
                 additive.getSourceUrl()
         );
-    }
-
-    private boolean isMilligramUnit(
-            String unit) {
-
-        if (unit == null) {
-            return false;
-        }
-
-        String normalized =
-                normalize(unit);
-
-        return normalized.equals("MG")
-                || normalized.equals("MILLIGRAM")
-                || normalized.equals("MILLIGRAMS");
-    }
-
-    private boolean isCompatibleUnit(
-            String detectedUnit,
-            String thresholdUnit) {
-
-        if (detectedUnit == null
-                || thresholdUnit == null) {
-
-            return false;
-        }
-
-        return normalize(detectedUnit)
-                .equals(normalize(thresholdUnit));
     }
 
     private String normalize(
@@ -360,7 +351,8 @@ public class AdditiveRiskAnalysisService {
 
         return value
                 .trim()
-                .toUpperCase(Locale.ROOT);
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ");
     }
 
     private void validateRequest(
@@ -373,17 +365,37 @@ public class AdditiveRiskAnalysisService {
             );
         }
 
-        if (request.getProductId() == null) {
-
-            throw new IllegalArgumentException(
-                    "productId is required"
-            );
-        }
-
         if (request.getHealthProfileId() == null) {
 
             throw new IllegalArgumentException(
                     "healthProfileId is required"
+            );
+        }
+
+        if (request.getProduct() == null) {
+
+            throw new IllegalArgumentException(
+                    "product is required"
+            );
+        }
+
+        if (request.getProduct().getProductName() == null
+                || request.getProduct()
+                .getProductName()
+                .isBlank()) {
+
+            throw new IllegalArgumentException(
+                    "product.productName is required"
+            );
+        }
+
+        if (request.getProduct().getIngredientsText() == null
+                || request.getProduct()
+                .getIngredientsText()
+                .isBlank()) {
+
+            throw new IllegalArgumentException(
+                    "product.ingredientsText is required for additive analysis"
             );
         }
     }

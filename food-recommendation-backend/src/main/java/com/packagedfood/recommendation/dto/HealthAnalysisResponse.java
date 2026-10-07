@@ -9,9 +9,11 @@ import java.util.List;
 @AllArgsConstructor
 public class HealthAnalysisResponse {
 
-    private Long productId;
+    private String productBarcode;
 
     private String productName;
+
+    private Long healthProfileId;
 
     private List<ConditionAnalysis> conditions;
 

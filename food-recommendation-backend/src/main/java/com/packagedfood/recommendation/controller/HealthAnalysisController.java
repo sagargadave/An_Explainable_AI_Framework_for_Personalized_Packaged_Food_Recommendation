@@ -15,8 +15,7 @@ public class HealthAnalysisController {
     public HealthAnalysisController(
             HealthAnalysisService healthAnalysisService) {
 
-        this.healthAnalysisService =
-                healthAnalysisService;
+        this.healthAnalysisService = healthAnalysisService;
     }
 
     @PostMapping("/analyze")
